@@ -28,15 +28,47 @@ func main() {
 		go handleConnection(conn)
 	}
 }
-
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	// TODO: Implement SOCKS5 protocol
-	// 1. Read client greeting and negotiate authentication method
-	// 2. Perform authentication if required (when PROXY_USER env var is set)
-	// 3. Read CONNECT request
-	// 4. Connect to target server
-	// 5. Send success/error reply
+	// 1. Read client greeting and choose authentication method
+	method, err := negotiateAuth(conn)
+	if err != nil {
+		log.Printf("authentication negotiation error: %v", err)
+		return
+	}
+
+	// 2. If username/password authentication is required, check credentials
+	if method == methodUserPass {
+		if err := authenticateUserPass(conn); err != nil {
+			log.Printf("username/password authentication error: %v", err)
+			return
+		}
+	}
+
+	// 3. Read CONNECT request and get target address
+	targetAddr, err := readConnectRequest(conn)
+	if err != nil {
+		log.Printf("CONNECT request error: %v", err)
+		return
+	}
+
+	// 4. Connect to the target server
+	targetConn, err := net.Dial("tcp", targetAddr)
+	if err != nil {
+		log.Printf("failed to connect to target %s: %v", targetAddr, err)
+		_ = sendReply(conn, repGeneralFailure)
+		return
+	}
+	defer targetConn.Close()
+
+	// 5. Send success reply to the client
+	if err := sendReply(conn, repSuccess); err != nil {
+		log.Printf("failed to send success reply: %v", err)
+		return
+	}
+
 	// 6. Relay data between client and target
+	relay(conn, targetConn)
 }
+
